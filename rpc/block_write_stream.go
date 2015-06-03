@@ -11,6 +11,7 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
+	"sync"
 )
 
 const (
@@ -34,6 +35,8 @@ type blockWriteStream struct {
 	ackError        error
 	acksDone        chan bool
 	lastPacketSeqno int
+
+	packetMutex sync.Mutex
 }
 
 type outboundPacket struct {
@@ -54,7 +57,7 @@ func (ae ackError) Error() string {
 	return fmt.Sprintf("Ack error from datanode: %s", ae.status.String())
 }
 
-var ErrInvalidSeqno = errors.New("Invalid ack sequence number")
+var ErrInvalidSeqno = errors.New("Invalid ack sequence numberzzzz")
 
 func newBlockWriteStream(conn io.ReadWriter) *blockWriteStream {
 	s := &blockWriteStream{
@@ -147,7 +150,9 @@ func (s *blockWriteStream) finish() error {
 func (s *blockWriteStream) flush(force bool) error {
 	for s.buf.Len() > 0 && (force || s.buf.Len() >= outboundPacketSize) {
 		packet := s.makePacket()
+		s.packetMutex.Lock()
 		s.packets = append(s.packets, packet)
+		s.packetMutex.Unlock()
 		s.offset += int64(len(packet.data))
 		s.seqno++
 
@@ -224,8 +229,9 @@ func (s *blockWriteStream) ackPackets() {
 		}
 
 		// Mark the packet as successful.
-		// TODO: is this threadsafe?
+		s.packetMutex.Lock()
 		s.packets = s.packets[1:]
+		s.packetMutex.Unlock()
 		if seqno == s.lastPacketSeqno {
 			return
 		}
